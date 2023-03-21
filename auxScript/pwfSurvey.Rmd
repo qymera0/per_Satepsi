@@ -1,0 +1,1280 @@
+---
+title: "LAR ERG 2021 MEMBERS SURVEY"
+subtitle: 'Relório técnico'
+author: ""
+output:
+  pdf_document:
+    includes:
+      in_header: latex/headFooter.tex
+      before_body: latex/before_body.tex
+  html_notebook: default
+  html_document:
+    df_print: paged
+bibliography: references.bib
+---
+
+```{=html}
+<style>
+body {text-align: justify}
+</style>
+```
+\newpage
+
+\thispagestyle{plain}
+
+\tableofcontents
+
+\newpage
+
+\thispagestyle{plain}
+
+# 0 INTRODUÇÃO
+
+Este relatório refere-se à análise de dados oriundos de uma pesquisa do tipo 'Survey', realizada com os participantes dos grupos de diversidade e inclusão corporativos da Whirlpool LAR (Pride, Women e Focus). Tem o objetivo de planejar a execução das ações no ano de 2022 e propor ações de melhoria contínua.
+
+Os participantes responderam perguntas de forma totalmente anônima; porém foi possível coletar algumas informações que serviram para categorizar os dados. Dessa forma, a análise apresentada aqui foi agrupada em três seções:
+
+-   Análise gráfica das respostas categóricas (consideradas nesta pesquisa como variáveis *independentes*) e das respostas ordinais (consideradas nesta pesquisa como variáveis possivelmente *dependentes*).
+
+-   Baseado nas variáveis dependentes, uma análise de cluster foi executada, com o objetivo de criar-se 'personas' - uma representação em relação às características comuns dos grupos que tendem a responder da mesma forma.
+
+-   Após a classificação de todas as pessoas em seus grupos, um modelo de árvore de classificação (CART) foi ajustado para tentar descrever, baseado nas variáveis independentes, como são esses grupos.
+
+**IMPORTANTE:** gráficos e resultados apresentados nesse relatório não têm o objetivo de serem utilizados em apresentações gerenciais. Para estas, deverá se definir quais informações serão mostradas e gráficos específicos deverão ser desenhados.
+
+A análise desses dados conta com o apoio do time de MBB´s (Master Black Belts) do Opex.
+
+\newpage
+
+\thispagestyle{plain}
+
+# 1 PACOTES E CARREGAMENTO DOS DADOS
+
+Ao todo 4 funções auxiliares foram usadas na análise. Para diminuir o uso de espaço estas funções serão apresentadas no apêndice.
+
+```{r PACKAGE, message=F, warning=F}
+
+library(tidyverse)
+library(magrittr)
+library(ggmosaic)
+library(tidyr)
+library(stringr)
+library(knitr)
+library(googledrive)
+library(googlesheets4)
+library(furrr)
+library(ordinal)
+library(factoextra)
+library(fpc)
+library(cluster)
+library(viridis)
+library(GGally)
+library(rpart)
+library(rpart.plot)
+
+# Source functions
+
+source("~/R/prideSurvey/functions/ind_plot_char.R")
+source('~/R/prideSurvey/functions/chi_Test_All.R')
+source('~/R/prideSurvey/functions/mosaic_plot.R')
+source('~/R/prideSurvey/functions/ordinal_fit_all.R')
+
+# Load data
+
+load("~/R/prideSurvey/dataSets/df.RData")
+
+```
+
+Como os dados são 'lidos' à partir de uma planilha no Google Sheets, que está salva no Google Drive da Whirlpool, não é possível fazê-lo de forma automática (uma autenticação é necessária para cada vez que o dado é acessado). Assim, os dados foram 'baixados' e salvos na variável *'df'*. Essa variável é lida cada vez que o código roda.
+
+**Importante:** se os dados da planilha do Google Sheets forem alterados, essa alteração não se refletirá na análise apresentada neste relatório.
+
+```{r KNITTROPTIONS, message=F, warning=F, include=F}
+
+opts_chunk$set(message = F, 
+               warning = F,
+               dpi = 300,
+               dev = "ragg_png"
+               )
+```
+
+\newpage
+
+\thispagestyle{plain}
+
+# 2 DATA WRANGLING
+
+## 2.1 Leitura dos dados
+
+Como dito anteriormente, a sequência apresentada aqui, para leitura dos dados no google drive, serve apenas de referência. Ela não é executada junto com o resto do código.
+
+```{r GSHEETSLOADDATA, eval=FALSE}
+
+# Autenticação no google drive
+
+drive_auth(email = "samuel_b_baco@whirlpool.com")
+
+# Read google sheets file
+
+df <- read_sheet("183lyH0WUMU-DoyUOnbkvBy13Wv-f3hERo5pjBzCqQIQ")
+
+# Salva arquivo para evitar autenticação
+
+save(df, file = "dataSets/df.RData")
+
+```
+
+## 2.2 Limpeza dos dados
+
+De modo geral, a planilha original passou por algumas alterações para facilitar a análise. Mudou-se o nome das colunas (as originais são os textos integrais das perguntas). Para as variáveis 'categóricas', mudou-se os níveis para nomes mais curtos. Algumas variáveis que permitiam um pouco mais de liberdade na resposta foram agrupadas em respostas semelhantes. 
+
+```{r DATACLEANING, tidy=TRUE, tidy.opts=list(width.cutoff=20)}
+
+dfClean <-
+        df %>% 
+        select(
+                -c("Carimbo de data/hora")
+        ) %>% 
+        rename(
+              'unid' = "Qual unidade você trabalha?",
+              'regime' = "Qual o seu regime de trabalho?",
+              'area' = "Em que área você trabalha?",
+              'leader' = "Você é people leader?" ,
+              'grupos' = "Quais grupos você participa atualmente?",
+              'plan' = "Eu faço algum tipo de planejamento semanal para trabalhar/participar das atividades do grupo(s) que faço parte.",
+               'hours' = "Quantas horas de trabalho semanalmente você dedica aos grupos que participa? (Por favor, utilize somente números na sua resposta)",
+              'enough' = "Em relação ao meu trabalho nos grupos que participo:",
+              'motivate' = "O trabalho nos grupos me motiva para executar minhas outras tarefas na Whirlpool.",
+              'epe' = "O trabalho nos grupos está refletido no seu EPE?",
+              'leadSpon' = "Meu gestor reconhece e patrocina meu trabalho nos grupos:",
+              'leadInclus' = "Meu gestor lidera de forma inclusiva a área em que trabalho:",
+              'whpSupp' = "A Whirlpool apóia de forma geral os grupos:",
+              'whpResour' = "A Whirlpool garante que os grupos tenham os recursos necessários para funcionar de forma efetiva:",
+              'whpInclus' = "A Whirlpool considera diversidade e inclusão um elemento importante de sua estratégia:",
+              'obje' = "Eu conheço os objetivos dos grupos que participo.",
+              'space' = "Eu tenho espaço para colaborar com minhas ideias nos grupos que participo.",
+              'effic' = "As idéias selecionadas de fato se concretizam em ações:",
+              'consci' = "As ações dos grupos que participo têm aumentado a consciência dos trabalhadores da Whirlpool sobre os temas pertinentes:" 
+        ) %>%
+        mutate(
+                unid = fct_recode(unid,
+                                  "jlle" = "Joinville",
+                                  "man" = "Manaus",
+                                  "rc" = "Rio Claro",
+                                  "sp" = "São Paulo"
+                ),
+                regime = fct_recode(regime,
+                                    "h" = "Horista",
+                                    "m" = "Mensalista"
+                ),
+                area = fct_recode(area,
+                                  "comun" = "Comunicação",
+                                  "consMulher" = "Consulado da Mulher",
+                                  "consCare" = "Consumer Care",
+                                  "d2c" = "D2C",
+                                  "digit" = "Digital",
+                                  "eco" = "Ecohouse",
+                                  "ehs" = "EHS",
+                                  "finan" = "Finanças",
+                                  "gpo" = "GPO (Desenvolvimento de produto)",
+                                  "gss" = "GSS (Suprimentos)",
+                                  "jur" = "Jurídico",
+                                  "log" = "Logística",
+                                  "man" = "Manufatura",
+                                  "mkt" = "Marketing",
+                                  "pan" = "Planning",
+                                  "qual" = "Qualidade",
+                                  "hr" = "Recursos Humanos",
+                                  "sus" = "Sustentabilidade",
+                                  "it" = "TI",
+                                  "vend" = "Vendas/Trade"
+                ),
+                leader =   fct_recode(leader,
+                                      "n" = "Não",
+                                      "s" = "Sim"
+                ),
+                plan = fct_recode(plan,
+                                  "onDemand" = "Apenas quando solicitado",
+                                  "onDemand" = "Em algumas semanas",
+                                  "n" = "Não",
+                                  "meeting" = "Participo das calls mensais e das iniciativas do WN.",
+                                  "meeting" = "Participo das reuniões semanais",
+                                  "ally" = "Participo somente como aliado.",
+                                  "onDemand" = "Planejamento quando havia projeto em andamento",
+                                  "onDemand" = "Pontualmente, dependendo da entrega proposta",
+                                  "s" = "Sim"
+                ),
+                enough =  fct_recode(enough,
+                                     "ok" = "O tempo que me dedico está alinhado com minha expectativa ou planejamento;",
+                                     "more" = "O tempo que me dedico geralmente é maior do que minha expectativa ou planejamento.",
+                                     "less" = "O tempo que me dedico geralmente é menor do que minha expectativa ou planejamento;"
+               ),
+               hours = as.numeric(hours),
+               epe =  fct_recode(epe,
+                                 "noYes" = "Não, mas gostaria.",
+                                 "noNo" = "Não, não gostaria.",
+                                 "yesYes" = "Sim, existe meta explícita.",
+                                 "yesNo" = "Sim, mas não como meta específica."
+               ),
+               across(
+                       where(is.numeric) & !c(hours),
+                       as.factor
+               ),
+               row = rep(1:65, times = 1)
+        )
+
+deCast <-
+        dfClean %>%
+        select(grupos, row) %>% 
+        separate(
+                grupos,
+                into = paste0('cols', seq(5))
+        ) %>%
+        mutate(
+                across(
+                        .cols = everything(), 
+                        .fns = str_replace,
+                        pattern = "(?<!u)s",
+                        replacement = NA_character_
+                ),
+                across(
+                        everything(),
+                        str_replace,
+                        'NetworK',
+                        NA_character_
+                )
+        ) %>% 
+        pivot_longer(cols = -row) %>% 
+        drop_na() %>% 
+        pivot_wider(
+                id_cols = row,
+                names_from = value,
+                values_fn = \(x) as.numeric(length(list(x)) > 0),
+                values_fill = 0
+        ) %>% 
+        mutate(row = as.numeric(row))
+
+dfClean <-
+        dfClean %>% 
+        left_join(deCast, by = 'row') %>% 
+        select(-grupos) %>% 
+        mutate(nGrup = PRIDE + Women + Focus,
+               nGrup = as.factor(nGrup),
+               PRIDE = as.factor(PRIDE),
+               Women = as.factor(Women),
+               Focus = as.factor(Focus)
+               )
+```
+
+Com a relação à variável referente ao grupos, por ser do tipo 'CATA' (catch all that apply), essa variável foi transformada em três variáveis 'dummy', cada uma com o nome de um dos grupos e com somente dois valores possíveis (0 para 'não participo' e 1 para 'participo'). Por último, uma variável que corresponde ao total de grupos que a pessoa participa foi criada.
+
+\newpage
+
+\thispagestyle{plain}
+
+# 3 ANÁLISE GRÁFICA
+
+Para descrever graficamente as variáveis, tanto categóricas quanto ordinais, escolheu-se gráficos de barra composta, seguindo a recomendação de @knaflic2015.
+
+A paleta de cores escolhida também está de acordo com a referência, e tem a propriedade de ser melhor percebida por pessoas que possuem algum tipo de discromatopsia.
+
+## 3.1 Variáveis categóricas
+
+```{r CATINDIVIDUALPLOTS, fig.show = "hold", out.width = "50%", out.height = "50%", results="hide"}
+
+# Quais colunas serão usadas para o plot
+
+catPlotColSel <- c(1:11)
+
+# Extrai os nomes das variáveis relacionadas às colunas selecionadas
+
+catPlotVarNa <-
+        dfClean %>%
+        select(1:5, 7, 9, 20:23) %>% 
+        names()
+
+catVarNames <- 
+        df %>% 
+        select(-c("Carimbo de data/hora")) %>% 
+        select(1:4, 6, 8, 10) %>% 
+        names() %>% 
+        as_tibble() %>%
+        bind_rows(
+                tibble(
+                        value = c('Participa do PRIDE', 
+                                  'Participa do Women', 
+                                  'Participa do Focus', 
+                                  'Participa de quantos grupos')
+                )
+        )
+        
+        
+# Constrói a lista contendo o nome da variável e o texto da pergunta
+
+catPlotList <- list()
+
+for (i in catPlotColSel) {
+  
+  catPlotList$y[[i]] <- catPlotVarNa[i]
+  catPlotList$title[[i]] <- as.character(catVarNames[i, ])
+  
+}
+  
+# Remove os valores "NULL"
+
+catPlotList$y <- compact(catPlotList$y)
+
+catPlotList$title <- compact(catPlotList$title)
+
+# Desenha os gráficos usando as variáveis selecionadas
+
+catPlotList %>% 
+  pmap(ind_plot_char, df = dfClean)
+
+# Plota tabela com a participação por grupos
+
+table(dfClean$PRIDE)
+
+table(dfClean$Women)
+
+table(dfClean$Focus)
+
+table(dfClean$nGrup)
+
+# Desenha o gráfico de horas gastas
+
+dfClean %>% 
+        ggplot(aes(x = hours)) + 
+        geom_histogram(binwidth = 1, fill = c("#440154FF")) + 
+        labs(
+                title = "Quantas horas de trabalho semanalmente você 
+                dedica\naos grupos que participa?",
+                y = '',
+                x = 'Horas'
+        ) + 
+        theme_minimal() + 
+                theme(legend.position = "bottom",
+                      legend.justification = "right",
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank(),
+                      axis.title = element_blank(),
+                      axis.text = element_text(colour = "azure4"),
+                      plot.title = element_text(size = 18,
+                                                colour = "azure4",
+                                                face = "bold"),
+                      plot.title.position = "plot",
+                      legend.text = element_text(colour = "azure4")
+                )
+
+```
+
+O público que respondeu a essa pesquisa é formado por colaboradores:
+
+-   Que são, em sua grande maioria, da cidade de São Paulo, 
+
+-   que em quase sua totalidade são mensalistas;
+
+-   que são das mais diversas áreas da empresa;
+
+-   que, em sua maioria, não são 'people leader', apesar de notar-se uma alta participação do segundo grupo também;
+
+-   que, em sua maioria, se planejam semanalmente para realizar as atividades dos grupos que participa; 
+
+-   que, em sua maioria, se dedicam menos do que gostariam ao grupo;
+
+-   que possuem em seu EPE alguma meta relacionada a D&I, mas não de forma explícita;
+
+-   onde 38% que participam do PRIDE, 46% que participam do Women e 23% que participam do PRIDE;
+
+-   onde somente 1 pessoa participa dos três grupos, 3 participam de 2 e a grande maioria, 61 pessoas, participa de somente um grupo. 
+
+-   que Trabalha em média 1 hora e 48 minutos por semana, valor que pode chegar, em alguns casos, até 5 horas.
+
+## 3.2 Variáveis ordinais
+
+```{r ORDINDIVIDUALPLOTS, fig.show = "hold", out.width = "50%", out.height = "50%", results="hide"}
+
+# Quais colunas serão usadas para o plot
+
+ordPlotColSel <- c(1:length(c(8, 10:18)))
+
+# Extrai os nomes das variáveis relacionadas às colunas selecionadas
+
+ordPlotVarNa <-
+        dfClean %>%
+        select(8, 10:18) %>% 
+        names()
+
+ordVarNames <- 
+        df %>% 
+        select(-c("Carimbo de data/hora")) %>% 
+        select(9, 11:19) %>% 
+        names() %>% 
+        as_tibble()
+
+# Constrói a lista contendo o nome da variável e o texto da pergunta
+
+ordPlotList <- list()
+
+for (i in ordPlotColSel) {
+  
+  ordPlotList$y[[i]] <- ordPlotVarNa[i]
+  ordPlotList$title[[i]] <- as.character(ordVarNames[i, ])
+  
+}
+  
+# Remove os valores "NULL"
+
+ordPlotList$y <- compact(ordPlotList$y)
+
+ordPlotList$title <- compact(ordPlotList$title)
+
+# Desenha os gráficos usando as variáveis selecionadas
+
+ordPlotList %>% 
+  pmap(ind_plot_char, df = dfClean)
+
+```
+
+Em relação às perguntas com escala hedônica(1 a 5), observa-se que a grande maioria das perguntas  recebeu respostas positivas (4 ou 5). 
+
+Um destaque deve ser feito para aquelas respostas que receberam valores 'mistos' ou negativos:
+
+-   De modo geral, não há uma concordância com relação à Whirlpool fornecer os recursos para que os grupos funcionm de forma efetiva (32% de respostas negativas);
+
+-   De modo geral, não há uma concordância em relação às ideias se concretizarem em ações (25% de notas negativas);
+
+## 3.3 Gráficos de mosaico
+
+Tentando entender se alguma variável independente (categórica) poderia afetar a distribuição de notas das variáveis dependentes (ordinal), um teste chi-quadrado foi aplicado para todas as combinações dois a dois' dessas variáveis (sempre uma independente e uma dependente).
+
+Combinações com p-values menores que 10% foram escolhidas e serão apresentadas em um gráfico tipo 'mosaico', com as variáveis dependentes no eixo 'y' e as variáveis independentes no eixo 'x'.
+
+```{r CHISQUARE, cache=T,  out.width = "50%", out.height = "50%", results="hide"}
+
+# Separa os X´s e os y´s
+
+dfDescribe <-
+        list(
+                xVar =
+                        dfClean %>%
+                                        select(1:5, 7, 9, 20:22) %>% 
+                                        names(),
+                yVar =  
+                        dfClean %>%
+                                        select(8, 10:18) %>% 
+                                        names()
+                        
+        )
+
+# Gera todas a combinações possíveis
+
+dfCross <-
+        transpose(
+                cross(
+                        dfDescribe
+                )
+        )
+
+# Aplicar a função paralelamente
+
+plan(multisession)
+
+chiResAll <- 
+        dfCross %>% 
+        future_pmap(chi_Test_All, 
+                    df = dfClean, 
+                    .options = furrr_options(seed = 123456)
+                    )
+
+plan(sequential)
+
+# Coletar os resultados e filtar pelo pvalue
+
+chiFiltered <-
+        dfCross %>%
+        as_tibble() %>% 
+        unnest_longer(col = c(xVar, yVar)) %>% 
+        bind_cols(unlist(chiResAll)) %>% 
+        rename('pvalue' = '...3') %>% 
+        filter(pvalue <= 0.1) %>% 
+        bind_rows()
+
+# Plota os gráficos do tipo mosaico
+
+chiFiltered %>%
+        pmap(mosaic_plot, df = dfClean)
+
+```
+
+De forma geral:
+
+-   Pessoas que disseram trabalhar mais do que planejam na semana, tendem a dar notas mais baixas para a avaliação do apoio geral da Whirlpool para com os grupos e para o recurso disponibilizado a eles;
+
+-   Horistas tendem a dar notas mais altas para a avaliação do recurso que a Whirlpool disponibiliza para os grupos, sendo que mensalistas tiveram uma discordância e apresentaram notas em todas as categorias (1 a 5);
+
+-   Há uma predominância de pessoas que não conhecem os objetivos dos grupos em São Paulo e Manaus.
+
+## 3.4 Horas gastas
+
+A variável 'horas gastas' tem uma natureza contínua, necessitando que o teste utilizado seja o verossimilhança. Da mesma forma que para as variáveis categóricas, um modelo de regressão logística original foi ajustado para todas as combinações entre 'horas gastas' e as variáveis dependentes. Também, somente as relações com valores de p-value maiores que 10% foram selecionadas.
+
+### 3.4.1 Seleção de respostas
+
+```{r TIMESPENT, cache=T}
+
+timeDescribe <-
+        list(
+                xVar =
+                        dfClean %>%
+                                        select(6) %>% 
+                                        names(),
+                yVar =  
+                        dfClean %>%
+                                        select(8, 10:18) %>% 
+                                        names()
+                        
+        )
+
+# Gera todas a combinações possíveis
+
+timeCross <-
+        transpose(
+                cross(
+                        timeDescribe
+                )
+        )
+
+# Faz a regressão com horas gastas e as outras respostas
+
+plan(multisession)
+
+timeOrdAll <- 
+        timeCross %>% 
+        future_pmap(ordinal_fit_all, 
+                    df = dfClean
+                    )
+
+plan(sequential)
+
+# Extrai 
+
+timeOrdFiltered <-
+        timeCross %>%
+        as_tibble() %>% 
+        unnest_longer(col = c(xVar, yVar)) %>% 
+        bind_cols(unlist(timeOrdAll)) %>% 
+        rename('pvalue' = '...3') %>% 
+        filter(pvalue <= 0.1) %>% 
+        bind_rows()
+
+```
+
+### 3.4.2 Modelos em detalhes
+
+Abaixo serão apresentados gráficos que representam o efeito de 'horas trabalhadas' em três respostas dependentes: (1) "Meu gestor lidera de forma inclusiva a área em que trabalho", (2) "A Whirlpool apóia de forma geral os grupos", (3) "A Whirlpool considera diversidade e inclusão um elemento importante de sua estratégia" (que mostraram um p-value menor que 10%).
+
+O gráfico mostrado tem em seu eixo 'x' a razão de chance (quantas vezes é mais provável uma nota ruim do que boa) para cada hora trabalhada durante a semana.
+
+A distribuição dessa razão de chance vem da parte aleatória do modelo (a precisão da estimativa ou a incerteza após a remoção do efeito sistemático). Esse gráfico **NÃO DEVERÁ** ser colocado na apresentação final. Ele é mostrado aqui somente para que possa-se ter uma idéia geral da incerteza de cada afirmação.
+
+**IMPORTANTE**: as relações aqui não devem ser consideradas de 'causa e efeito'. Somente uma associação entre duas variáveis medidas. A causalidade deve ser investigada posteriormente.
+
+#### Lider inclusivo
+
+```{r LEADINCLUS, out.width = "50%", out.height = "50%"}
+
+leadInlusMdl <-
+        clm(leadInclus ~ hours, data = dfClean)
+
+leadIncSim <-
+        data.frame(
+                coef = rnorm(
+                        n = 100000,
+                        mean = coef(leadInlusMdl)['hours'],
+                        sd = sqrt(vcov(leadInlusMdl)['hours', 'hours'])
+                )
+        ) %>% 
+        mutate(
+                odds = exp(coef),
+                invOdds = 1/odds
+        )
+
+leadIncSim %>%
+        filter(invOdds <= 3) %>% 
+        ggplot(aes(x = invOdds)) + 
+        geom_histogram(bins = 30, fill = c("#440154FF")) +
+        scale_x_continuous(breaks = seq(0, 3, by = 0.5)) + 
+        labs(
+                title = 'Chance de nota ruim para chefe inclusivo',
+                subtitle = 'Aumento para cada hora trabalhada por semana',
+                x = 'Razão de chance',
+                y = ''
+        ) +
+        theme_minimal() + 
+                theme(legend.position = "bottom",
+                      legend.justification = "right",
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank(),
+                      axis.title.x = element_text(colour = "azure4"),
+                      axis.title.y = element_blank(),
+                      axis.text.y = element_blank(),
+                      axis.text = element_text(colour = "azure4"),
+                      plot.title = element_text(size = 18,
+                                                colour = "azure4",
+                                                face = "bold"),
+                      plot.title.position = "plot",
+                      plot.subtitle = element_text(size = 14,
+                                                   colour = "azure4",
+                                                   face = 'plain'),
+                      legend.text = element_text(colour = "azure4")
+                )
+
+
+```
+
+A cada hora trabalhada, aumenta-se 1.5 vezes (em média) a chance de uma pessoa discordar (dar uma nota ruim) para a afirmação "Meu gestor lidera de forma inclusiva a área em que trabalho".
+
+### Whirpool suportiva com os grupos
+
+```{r WHPSUPP, out.width = "50%", out.height = "50%"}
+
+wSuppMdl <-
+        clm(whpSupp ~ hours, data = dfClean)
+
+wSuppcSim <-
+        data.frame(
+                coef = rnorm(
+                        n = 100000,
+                        mean = coef(wSuppMdl)['hours'],
+                        sd = sqrt(vcov(wSuppMdl)['hours', 'hours'])
+                )
+        ) %>% 
+        mutate(
+                odds = exp(coef),
+                invOdds = 1/odds
+        )
+
+wSuppcSim %>%
+        filter(invOdds <= 3.5) %>% 
+        ggplot(aes(x = invOdds)) + 
+        geom_histogram(bins = 30, fill = c("#440154FF")) +
+        scale_x_continuous(breaks = seq(0, 3.5, by = 0.5)) + 
+        labs(
+                title = 'Chance de nota ruim para Whirlpool suportiva',
+                subtitle = 'Aumento para cada hora trabalhada por semana',
+                x = 'Razão de chance',
+                y = ''
+        ) +
+        theme_minimal() + 
+                theme(legend.position = "bottom",
+                      legend.justification = "right",
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank(),
+                      axis.title.x = element_text(colour = "azure4"),
+                      axis.title.y = element_blank(),
+                      axis.text.y = element_blank(),
+                      axis.text = element_text(colour = "azure4"),
+                      plot.title = element_text(size = 18,
+                                                colour = "azure4",
+                                                face = "bold"),
+                      plot.title.position = "plot",
+                      plot.subtitle = element_text(size = 14,
+                                                   colour = "azure4",
+                                                   face = 'plain'),
+                      legend.text = element_text(colour = "azure4")
+                )
+
+
+
+```
+
+A cada hora trabalhada, aumenta-se 2 vezes (em média) a chance de uma pessoa discordar (dar uma nota ruim) para a afirmação ""A Whirlpool apóia de forma geral os grupos".
+
+### Whirlpool inclusiva
+
+```{r WHPINCLUs, out.width = "50%", out.height = "50%"}
+
+wInclMdl <-
+        clm(whpInclus ~ hours, data = dfClean)
+
+wInclSim <-
+        data.frame(
+                coef = rnorm(
+                        n = 100000,
+                        mean = coef(wInclMdl)['hours'],
+                        sd = sqrt(vcov(wInclMdl)['hours', 'hours'])
+                )
+        ) %>% 
+        mutate(
+                odds = exp(coef),
+                invOdds = 1/odds
+        )
+
+wInclSim %>%
+        filter(invOdds <= 3) %>% 
+        ggplot(aes(x = invOdds)) + 
+        geom_histogram(bins = 30, fill = c("#440154FF")) +
+        scale_x_continuous(breaks = seq(0, 3, by = 0.5)) + 
+        labs(
+                title = 'Chance de nota ruim para Whirlpool 
+                inclusiva na\nestratégia',
+                subtitle = 'Aumento para cada hora trabalhada por semana',
+                x = 'Razão de chance',
+                y = ''
+        ) +
+        theme_minimal() + 
+                theme(legend.position = "bottom",
+                      legend.justification = "right",
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank(),
+                      axis.title.x = element_text(colour = "azure4"),
+                      axis.title.y = element_blank(),
+                      axis.text.y = element_blank(),
+                      axis.text = element_text(colour = "azure4"),
+                      plot.title = element_text(size = 18,
+                                                colour = "azure4",
+                                                face = "bold"),
+                      plot.title.position = "plot",
+                      plot.subtitle = element_text(size = 14,
+                                                   colour = "azure4",
+                                                   face = 'plain'),
+                      legend.text = element_text(colour = "azure4")
+                )
+
+
+
+```
+
+A cada hora trabalhada, aumenta-se 1.5 vezes (em média) a chance de uma pessoa discordar (dar uma nota ruim) para a afirmação "A Whirlpool considera diversidade e inclusão um elemento importante de sua estratégia".
+
+\newpage
+
+\thispagestyle{plain}
+
+# 4 CRIAÇÃO DOS CLUSTER (PERSONA)
+
+A criação de personas depende que seja realizada uma análise de cluster, o que permitirá 'agrupar' pessoas que responderam às variáveis dependentes de forma similar. A criação de cluster demanda decisões com relação a dois aspectos: qual o método que será utilizado para o agregamento de distâncias entre pessoas e o número de clusters que será mantido.
+
+## 4.1 Determinação do método de agregamento das distâncias
+
+```{r DISTANCEMETHOD}
+
+# Possíveis métodos de cálculo de distancia
+
+method <- list("average", "single", "complete", "ward")
+
+# Cálculo do coeficiente de aglomeração para todos os métodos
+
+ac <- function(x) {agnes(dfClean %>% select(8, 10:18) %>% as.data.frame(), 
+                         method = x,
+                         diss = F)$ac}
+      
+aggCoef <- map_dbl(method, ac)
+
+aggCoef <- tibble(simplify(method), aggCoef)
+
+names(aggCoef) <- c("Method", "Agregation Coeficient")
+
+aggCoef
+
+```
+
+O método recomendado para essses dados é o de 'ward'.
+
+## 4.2 Determinação do número de clusters
+
+```{r GRAPHICCLUSTER, fig.show = "hold", out.width = "33%", out.height = "33%", results="hide"}
+
+fviz_nbclust(dfClean %>% 
+             select(8, 10:18) %>% 
+             as.data.frame(), 
+             FUN = hcut, 
+             method = "wss")
+
+fviz_nbclust(dfClean %>% 
+             select(8, 10:18) %>% 
+             as.data.frame(),
+             FUN = hcut, 
+             method = "silhouette")
+
+fviz_gap_stat(clusGap(dfClean %>% 
+                      select(8, 10:18) %>%
+                      mutate(
+                              across(
+                                      where(is.factor),
+                                      as.numeric
+                              )
+                      ) %>% 
+                      as.data.frame(), 
+                      FUN = hcut, 
+                      nstart = 25, 
+                      K.max = 20, B = 50))
+
+```
+
+A recomendação para o número de clusters fica entre 2 e 3.
+
+## 4.3 Validação do número de clusters
+
+Por fim, ao se decidir o número de clusters, é importante avaliar se esse número seria diferente se dados diferentes fossem coletados, através do coeficiente de Jaccard.
+
+```{r JACCKARDCOEF, results=F}
+
+jccCoef <-
+        dfClean %>% 
+                      select(8, 10:18) %>%
+                      mutate(
+                              across(
+                                      where(is.factor),
+                                      as.numeric
+                              )
+                      ) %>% 
+                      as.data.frame() %>% 
+         clusterboot(clustermethod = hclustCBI,
+                     method = "ward.D",
+                     k = 3)
+
+```
+
+```{r JACKARDEVAL}
+
+jccCoef$bootmean
+
+jccCoef$bootbrd
+
+```
+
+Das 100 amostras de bootstrap, apenas poucas delas levariam a uma organização diferente, validando a quantidade de 3 clusters.
+
+## 4.4 Classificação dos respondentes em clusters
+
+Essa etapa apenas salva nos dados originais a qual cluster cada respondente participa.
+
+```{r PERSONSACREATION}
+
+personaHc <-
+        dfClean %>%
+        select(8, 10:18) %>%
+        mutate(
+                across(
+                        where(is.factor),
+                        as.numeric
+                        )
+                ) %>%
+        as.data.frame() %>%
+        dist(method = "euclidian") %>%
+        hclust(method = "ward.D")
+
+# Plota o dendograma
+
+color <- viridis(3)
+
+fviz_dend(personaHc,
+          k = 3,
+          palette = color) +
+labs(X = "", 
+     y = "", 
+     title = "Dendograma das três personas") + 
+theme_minimal() + 
+theme(panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.title = element_blank(),
+      axis.text = element_blank(),
+      plot.title = element_text(size = 18,
+                                colour = "azure4",
+                                face = "bold"),
+      plot.title.position = "plot"
+      )
+
+```
+
+## 4.5 Descrição das personas
+
+Com todas as pessoas classificadas, é possível agora olhar em mais detalhes como cada cluster respondeu às perguntas (variáveis) dependentes. Para facilitar a visualização, as notas de 1 a 5 de cada respondente foram 'jitterizadas' - uma pequena perturbação aleatória foi adicionada a cada nota.
+
+```{r PPLOTS,  fig.show = "hold", out.width = "50%", out.height = "50%", results="hide"}
+
+# Salvar o cluster de cada pessoa na tabela
+
+dfClean$cluster <- cutree(personaHc, k = 3)
+
+# Jitter notas para facilitar o plot
+
+dfMelted <-
+        dfClean %>%
+        select(8, 10:18, cluster) %>%
+        mutate(
+                across(
+                        where(is.factor),
+                        as.numeric
+                        )
+                ) %>%
+        as.data.frame() %>%
+        mutate(
+                across(
+                        everything() & !c(cluster),
+                        jitter
+                ),
+                cluster = as.factor(cluster)
+        )
+        
+# Parallel plots - todos
+
+ggparcoord(dfMelted, 
+           columns = 1:10, 
+           alphaLines = 0.2, 
+           scale = "globalminmax",
+           title = "Distribuição geral das notas") + 
+    labs(y = "",
+         x = "")  +
+    theme_minimal() + 
+    theme(panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          axis.title = element_text(colour = "azure4"),
+          axis.text = element_text(colour = "azure4"),
+          plot.title = element_text(size = 18,
+                                    colour = "azure4",
+                                    face = "bold"),
+          plot.title.position = "plot",
+          plot.subtitle = element_text(size = 12,
+                                       colour = "azure4")
+        )
+
+#Parallel plot - cluster 01
+
+dfMelted %>% 
+  arrange(factor(cluster, levels = c(3,2,1))) %>% 
+  ggparcoord(columns = 1:10,
+             groupColumn = 11,
+             alphaLines = 0.8, 
+             scale = "globalminmax",
+             title = "Distribuição das notas - Cluster 1") +
+  scale_color_manual(values = c("#440154FF", "#E8E8E8", "#E8E8E8")) +
+    labs(y = "",
+         x = "")  +
+    theme_minimal() + 
+    theme(legend.position = "none",
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          axis.title = element_text(colour = "azure4"),
+          axis.text = element_text(colour = "azure4"),
+          plot.title = element_text(size = 18,
+                                    colour = "azure4",
+                                    face = "bold"),
+          plot.title.position = "plot",
+          plot.subtitle = element_text(size = 12,
+                                       colour = "azure4")
+        )
+
+# Parallel plot - cluster 02
+
+dfMelted %>% 
+  arrange(factor(cluster, levels = c(3,1,2))) %>% 
+  ggparcoord(columns = 1:10,
+             groupColumn = 11,
+             alphaLines = 0.8, 
+             scale = "globalminmax",
+             title = "Distribuição das notas - Cluster 2") +
+  scale_color_manual(values = c("#E8E8E8", "#31688EFF", "#E8E8E8")) +
+    labs(y = "",
+         x = "")  +
+    theme_minimal() + 
+    theme(legend.position = "none",
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          axis.title = element_text(colour = "azure4"),
+          axis.text = element_text(colour = "azure4"),
+          plot.title = element_text(size = 18,
+                                    colour = "azure4",
+                                    face = "bold"),
+          plot.title.position = "plot",
+          plot.subtitle = element_text(size = 12,
+                                       colour = "azure4")
+        )
+
+# Parallel plot - cluster 03
+
+dfMelted %>% 
+  arrange(factor(cluster, levels = c(1,2,3))) %>% 
+  ggparcoord(columns = 1:10,
+             groupColumn = 11,
+             alphaLines = 0.8, 
+             scale = "globalminmax",
+             title = "Distribuição das notas - Cluster 3") +
+  scale_color_manual(values = c("#E8E8E8", "#E8E8E8","#35B779FF")) +
+    labs(y = "",
+         x = "")  +
+    theme_minimal() + 
+    theme(legend.position = "none",
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          axis.title = element_text(colour = "azure4"),
+          axis.text = element_text(colour = "azure4"),
+          plot.title = element_text(size = 18,
+                                    colour = "azure4",
+                                    face = "bold"),
+          plot.title.position = "plot",
+          plot.subtitle = element_text(size = 12,
+                                       colour = "azure4")
+        )
+```
+
+O primeiro gráfico não faz nenhuma distinção entre os 3 clusters e mostra as notas de todos os respondentes. É possível ver que há algumas concordância generalizadas, como o fato de as perguntas sobre a Whirlpool ser inclusiva em sua estratégia e as pessoas conhecerem os objetivos de seus grupos não terem recebido nenhuma nota 5. Fora isso, é possível ver também uma grande predominância  de notas 4 e 5 em toda a pesquisa.
+
+O segundo gráfico, mostra em 'roxo' as notas do grupo 01 e em cinza claro as nota das outras pessoas. Esse grupo é o que tem a maior variação de todos e único que têm quantidades significativas de notas 1, 2 e 3, em praticamente todas as respostas. Com exceção da pergunta referente aos grupos serem espaços em que se pode contribuir de força livre com as idéias. Podemos colocar que esse é o grupo dos mais 'insatisfeitos' da pesquisa, de forma geral.
+
+O terceiro gráfico mostra em 'azul' as notas do grupo 02 e em cinza claro as notas das outras pessoas. Esse é o grupo que em geral colocou as maiores notas (4 e 5) para todas as perguntas. Esse é o grupo dos 'contentes com tudo'. 
+
+O quarto gráfico mostra em 'verde' as notas do grupo 03 e em cinza claro as notas das outras pessoas. Esse é o grupo que em geral colocou notas medianas (3 e 4) para todas as perguntas. Esse é o grupo dos 'medianamente contentes'. 
+
+\newpage
+
+\thispagestyle{plain}
+
+# 5 DESCRIÇÃO DAS PERSONAS
+
+Finalmente, é possível tentar descrever os grupos (cluster-persona) utilizando as variáveis dependentes e um modelo do tipo árvore de classificação (CART).
+
+```{r CLASSIFICATION TREE}
+
+set.seed(100)
+
+dfTree <-
+        dfClean %>%
+        select(1:7, 9, 20:24) %>%
+        mutate(cluster = factor(cluster))
+
+# Parametros de controle do algoritmo
+
+ctrl <- 
+        rpart.control(
+                minsplit = 3,
+                maxdepth = 30,
+                xval = 30,
+                cp = -1
+        )
+
+# Modelo
+
+classTree <- 
+        rpart(
+                cluster ~.,
+                data = dfTree,
+                control = ctrl,
+                method = "class"
+        )
+
+# Mostra os números de error relativo para validação cruzada
+
+printcp(classTree)
+
+plotcp(classTree)
+
+```
+
+Para ajustar o modelo adequado, a complexidade (profundidade da árvore) é definida pelo parâmetro 'cp', que é escolhido de forma que o erro de validação cruzada seja minimizado. No gráfico acima, é possível ver que esse valor é 0.022 (pois sempre deve-se preferir a árvore mais simples, que produza o melhor resultado).
+
+**IMPORTANTE:**  os resultados mostrados a partir do ajuste da árvore devem ser utilizados com muita parcimônia, uma vez que 65 linhas é um valor extremamente baixo para esse tipo de modelo.
+
+```{r ARVOREFINAL, out.extra='angle=90', out.width='860px'}
+
+finalTree <- prune(classTree, cp = 0.022)
+
+rpart.plot(finalTree,
+           type = 3,
+           clip.right.labs = F,
+           branch = .3,
+           cex = 0.5,
+           under = T,
+           tweak = 1,
+           branch.lty = 3,
+           under.cex = 1)
+
+finalTree$variable.importance
+
+```
+
+Talvez a melhor avaliação é entender quais variáveis levaram as pessoas a serem do grupo 1, que produziu notas mais baixas. Há seis caminhos possíveis para o grupo 1:
+
+-   Caminho 1: regime mensalista, áreas do Consulado da mulher, D2C, ecohouse, manufatura e marketing, que ou não possuem metas no EPE e gostariam, ou que possuem mas não de forma explícita;
+
+-   Caminho 2: Pessoas do grupo Fucus, que trabalham nas áreas de Digital, GSS, Jurídico, Recursos humanos e Sustentabilidade,
+
+-   Caminho 3: Pessoas que não do Focus, das áreas de Digital, GSS e RH, que são people-leaders.
+
+-   Caminho 4: Pessoas que não do Focus, das áreas de Digital, GSS e RH, que não são people leaders e que planejam executar suas tarefas 'on demand';
+
+-   Caminho 5: Pessoas que ou não planejam suas atividades ou se consideram aliados, de Joinville e Rio Claro, que são people leaders e que tem meta explícita no EPE;
+
+-   Caminho 6:  Pessoas que ou não planejam suas atividades ou se consideram aliados, de São Paulo, que trabalham mais de 4 horas semanais nas atividades dos grupos.
+
+Os caminhos para os outros grupos podem ser retirados da análise do gráfico de árvore.
+
+\newpage
+
+\thispagestyle{plain}
+
+# 6 CONCLUSÃO
+
+A pesquisa mostrou que há grandes oportunidades de melhoria contínua para o trabalho dos grupos em 2022, entre elas:
+
+-   Suporte geral (de recursos, de estratégia) da Whirlpool, como empresa e como marca, para os grupos,
+
+-   Investigar a relação entre a quantidade de horas trabalhadas e as notas baixas, 
+
+-   Incentivar a participação de mais horistas,
+
+-   Entender a inclusão 'explícita' das metas de diversidade no EPE podem ajudar as pessoas a se dedicarem.
+
+**Importante:** todas as conclusões e apontamentos deste relatório são baseados nos dados coletados. \
+
+\newpage
+
+\thispagestyle{plain}
+
+# APÊNDICE
+
+## A.1 Função para teste chisquare
+
+```{r CHISQUARETEST, eval=F}
+
+chi_Test_All <- function(xVar, yVar, df){
+        
+        contTable <-
+                df %>% 
+                select(all_of(xVar), all_of(yVar)) %>% 
+                table()
+        
+        chi <- chisq.test(contTable, simulate.p.value = T)
+        
+        return(pvalue = chi$p.value)
+
+```
+
+## A.2 Função para plot do gráfico de barras individuais
+
+```{r INDPLOTCHAR, eval=FALSE}
+
+ind_plot_char <- function(df, y, title){
+        
+        df %>% 
+                arrange(.data[[y]]) %>% 
+                ggplot(aes_string(x = shQuote(''), fill = y)) +
+                geom_bar(position = position_fill(reverse = TRUE), 
+                         width = 0.6) +
+                scale_y_continuous(labels = scales::percent) +
+                coord_flip() +
+                scale_fill_viridis_d(name = "") + 
+                labs(X = "", y = "", title = paste(strwrap(title,
+                                                           width = 50),
+                                                   collapse = "\n")) + 
+                theme_minimal() + 
+                theme(legend.position = "bottom",
+                      legend.justification = "right",
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank(),
+                      axis.title = element_blank(),
+                      axis.text = element_text(colour = "azure4"),
+                      plot.title = element_text(size = 18,
+                                                colour = "azure4",
+                                                face = "bold"),
+                      plot.title.position = "plot",
+                      legend.text = element_text(colour = "azure4")
+                )
+}
+
+```
+
+## A.3 Função para gráfico de mosaico
+
+```{r MOSAICPLOT, eval=F}
+
+mosaic_plot <- function(..., df){
+
+        # Salva informação das variáveis
+        
+        varNames <- tibble(...)
+        
+        # Plota o gráfico
+        
+        df %>%
+                ggplot() + 
+                geom_mosaic(
+                        aes_string(
+                                x = paste0(
+                                        'product(',
+                                        varNames$yVar,
+                                        ', ',
+                                        varNames$xVar,
+                                        ')'
+                                ),
+                                fill = paste0(varNames$yVar)
+                        )
+                        
+                ) +
+                scale_fill_viridis_d(name = "", option = 'A') + 
+                theme_minimal() + 
+                theme(legend.position = "right",
+                      legend.justification = "right",
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank(),
+                      axis.text = element_text(colour = "azure4"),
+                      plot.title = element_text(size = 18,
+                                                colour = "azure4",
+                                                face = "bold"),
+                      plot.title.position = "plot",
+                      legend.text = element_text(colour = "azure4")
+                )
+    
+        
+}
+
+```
+
+## A.4 Função para fit ordinal
+
+```{r ORDINALFIT, eval=F}
+
+ordinal_fit_all <- function(xVar, yVar, df){
+        
+        formula <- 
+                formula(paste0(yVar, '~', 'scale(', xVar, ')'))
+        
+        pValue <-
+                clm(
+                        formula,
+                        data = df
+                ) %>% 
+                summary() %>% 
+                extract("coefficients") %>%
+                extract2('coefficients') %>% 
+                as_tibble() %>% 
+                select("Pr(>|z|)") %>%
+                dplyr::slice(n())
+        
+        return(pValue)
+        
+}
+
+```
+
+\newpage
+
+\thispagestyle{plain}
+
+# LISTA DE TODOS OS PACOTES UTILIZADOS
+
+\hspace{-2.5em}
+
+```{r SESSION INFO}
+
+sessionInfo()
+
+```
+
+\newpage
+
+\thispagestyle{plain}
+
+# REFERÊNCIAS

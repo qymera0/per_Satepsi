@@ -1,0 +1,18 @@
+% Add figure to the first page
+\usepackage{titling}
+
+\pretitle{\begin{center}
+
+\posttitle{\end{center}}
+
+% Configure header and footer
+\usepackage{fancyhdr}
+
+\pagestyle{fancy}
+
+% center of header
+\fancyhead[CO,CE]{}
+
+% page number on the left of even pages and right of odd pages
+\fancyfoot[LE,RO]{\thepage}
+

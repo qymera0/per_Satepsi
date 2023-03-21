@@ -1,0 +1,453 @@
+---
+title: "GPO RIO CLARO DEMOGRAPHCIS"
+author: "Ana Claudia Aidar Correa, Nicole Waiswol and Samuel B Baco"
+date: "July / 2021"
+output:
+  beamer_presentation: default
+  slidy_presentation: default
+---
+
+```{r PACKAGES, message = F, warning = F, echo=FALSE}
+
+library(tidyverse)
+library(lubridate)
+library(ggmosaic)
+library(viridis)
+library(FactoMineR)
+library(factoextra)
+library(stringr)
+library(magrittr)
+library(grid)
+library(gridExtra)
+library(ggpubr)
+library(parameters)
+library(cluster)
+library(fpc)
+library(reshape2)
+
+```
+
+```{r LOAD DATA, message = F, warning = F, echo=F}
+
+demographics <- 
+        read.csv("~/R/demographics/datasets/demographics.csv", 
+                 encoding = "UTF-8", 
+                 stringsAsFactors = TRUE) %>% 
+        filter(Unidade == 'Unidade Rio Claro') %>% 
+        rename(
+                "ethnicity" = "Origem.étnica",
+                'disability' = "Grupo.de.deficiência",
+                'birthday' = "Data.de.nascimento",
+                'age' = "IDADE",
+                'age.range' = "AGE.RANGE",
+                'gender' = "Gênero",
+                'category' = "Categoria",
+                'admission' = "Admissão",
+                'work.time' = "TEMPO.DE.CASA",
+                'tenure' = 'TENURE',
+                'city' = 'Unidade',
+                'level' = 'Level'
+        ) %>% 
+        select(-city) %>%
+        mutate(birthday = dmy(birthday),
+               admission = dmy(admission))
+
+```
+
+```{r DATA RECODE, message = F, warning = F, echo=F}
+
+demographics$disability <- 
+        fct_recode(demographics$disability,
+                  "Physical disabilities" = "Deficiência Física",
+                  "Visual impairment" = "Deficiência Visual",
+                  "None" = "Não atribuído"
+)
+
+demographics$gender <- 
+        fct_recode(demographics$gender,
+                  "female" = "feminino", "male" = "masculino"
+)
+
+demographics$category <- 
+        fct_recode(demographics$category,
+                  "Adm" = "Administrativo", "Manager" = "Chefia de Seção",
+                  "Senior manager" = "Gerência", "Director" = "Gerência Geral",
+                  "Direct operational" = "Operacional Direto",
+                  "Indirect operational" = "Operacional Indireto",
+                  "Intern" = "Universitario"
+)
+
+demographics$age.range <- 
+        fct_relevel(demographics$age.range,
+                  "<20 years", "20 - 25 years", "25 - 30 years", "30 - 35 years",
+                  "35 - 40 years", "40 - 45 years", "45 - 50 years", "> 50 years"
+)
+
+demographics$level <- 
+        fct_recode(demographics$level,
+                  "Interns" = "0 - Interns", "Blue Collar" = "1 - Blue Collar",
+                  "Technician" = "2 - Technician",
+                  "Associate" = "3 - Associate",
+                  "Analyst" = "4 - Analyst",
+                  "Senior Analyst" = "5 - Senior Analyst", 
+                  "Manager" = "6 - Manager",
+                  "Senior Manager" = "7 - Senior Manager",
+                  "Director" = "8 - Director"
+)
+
+demographics$level <- 
+        fct_relevel(demographics$level,
+                  "Interns", "Blue Collar", "Technician", "Associate", "Analyst",
+                  "Senior Analyst", "Manager", "Senior Manager", "Director"
+)
+
+demographics$tenure <- 
+        fct_relevel(demographics$tenure,
+                  "< 1 year", "1 - 3 years", "3 - 5 years", "5 - 10 years", 
+                  "10 -15 years","15 - 20 years", "> 20 years"
+)
+
+demographics$category <- 
+        fct_relevel(demographics$category,
+                  "Indirect operational", "Direct operational", "Intern", "Adm",
+                  "Manager", "Senior manager", "Director"
+)
+
+```
+
+## Gender and service time
+
+```{r GENDERSERVICE, message = F, warning = F, echo = F}
+
+ggplot(data = demographics) +
+        geom_mosaic(aes(x = product(gender), fill = tenure)) + 
+        labs(
+                x = '',
+                y = '',
+        ) +
+        guides(fill = 'none') +
+        scale_fill_viridis_d() +
+        theme_classic() + 
+        theme(
+                axis.line = element_blank(),
+                axis.ticks = element_blank(),
+                title = element_text(size = 16, 
+                                     colour = 'dimgray', 
+                                     face = 'bold')
+        )
+```
+
+## Gender and level
+
+```{r GENDERLEVEL, message=F, warning=F, echo=F}
+
+ggplot(data = demographics) +
+        geom_mosaic(aes(x = product(gender), fill = level)) + 
+        labs(
+                x = '',
+                y = '',
+        ) +
+        guides(fill = 'none') +
+        scale_fill_viridis_d() +
+        theme_classic() + 
+        theme(
+                axis.line = element_blank(),
+                axis.ticks = element_blank(),
+                title = element_text(size = 16, 
+                                     colour = 'dimgray', 
+                                     face = 'bold')
+        )
+```
+
+## Gender and Age
+
+```{r GENDERAGE, message=F, warning=F, echo=F}
+
+ggplot(data = demographics) +
+        geom_mosaic(aes(x = product(gender), fill = age.range)) + 
+        labs(
+                x = '',
+                y = '',
+        ) +
+        guides(fill = 'none') +
+        scale_fill_viridis_d() +
+        theme_classic() + 
+        theme(
+                axis.line = element_blank(),
+                axis.ticks = element_blank(),
+                title = element_text(size = 16, 
+                                     colour = 'dimgray', 
+                                     face = 'bold')
+        )
+```
+
+## Characteristics proximity
+
+```{r CORRESPONDENCE, message=F, warning=F, echo=F}
+
+# Filter data to correspondence analysis
+
+demoMca <- 
+        demographics %>%
+        filter(as.character(ethnicity) != 'Não informado') %>% 
+        select_if(is.factor) %>%
+        select(-category, -Division, -disability, -Department)
+
+# Total number of components
+
+ncpFull <- sum(apply(demoMca, 2, function(x) length(unique(x))))
+
+# MCA Full
+
+mcaFull <-
+        demoMca %>% 
+        MCA(ncp = ncpFull, graph = F)
+
+# MCA reduced
+
+expVar <- 85
+
+ncp <-
+        mcaFull$eig %>%
+        as.data.frame() %>% 
+        rownames_to_column() %>% 
+        as.tibble() %>% 
+        filter(`cumulative percentage of variance` >= expVar) %>% 
+        select(rowname) %>% 
+        slice_head(n = 1) %>% 
+        as.character() %>% 
+        str_split(pattern = ' ') %>%
+        extract2(1) %>%
+        extract(2) %>% 
+        as.numeric()
+
+mcaCoord <-
+        demoMca %>% 
+        MCA(ncp = ncp, graph = F) %>% 
+        extract('var') %>% 
+        flatten() %>% 
+        extract('coord') %>% 
+        extract2(1) %>% 
+        as.data.frame() %>% 
+        rownames_to_column() %>% 
+        as.tibble()
+
+# General distance matrix
+
+distMatrix <-
+        as.matrix(
+                dist(mcaCoord %>% select(-rowname))
+        )
+
+row.names(distMatrix) <- mcaCoord$rowname
+
+colnames(distMatrix) <- mcaCoord$rowname
+
+# Distance from female
+
+femaleDist <-
+        distMatrix['female', ] %>% 
+        as.data.frame() %>%
+        rownames_to_column() %>% 
+        as.tibble() %>% 
+        rename('proximity' = '.', 'char'='rowname') %>% 
+        mutate(proximity = 1/(abs(proximity))) %>% 
+        arrange(desc(proximity)) %>% 
+        filter(char != 'female') %>% 
+        filter(char != 'male')
+
+# Distance from female
+
+maleDist <-
+        distMatrix['male', ] %>% 
+        as.data.frame() %>%
+        rownames_to_column() %>% 
+        as.tibble() %>% 
+        rename('proximity' = '.', 'char'='rowname') %>% 
+        mutate(proximity = 1/(abs(proximity))) %>% 
+        arrange(desc(proximity)) %>% 
+        filter(char != 'female') %>% 
+        filter(char != 'male')
+
+# Plot for female
+
+womenCat <- 
+        ggplot(data = femaleDist,
+        aes(x = reorder(char, proximity), y = proximity)) + 
+        geom_col(fill = 'darkblue') +
+        geom_text(aes(label = round(proximity, digits = 3)),
+                  hjust = -0.2,
+                  color = 'dimgray') +
+        coord_flip() + 
+        ylim(0, 0.6) +
+        labs(
+                title = 'Women',
+                x = '',
+                y = ''
+        ) + 
+        theme_classic() + 
+             theme(
+                title = element_text(size = 12, 
+                                     colour = 'dimgray',
+                                     face = 'italic'),
+                plot.title.position = 'plot',
+                axis.line = element_blank(),
+                axis.ticks = element_blank(),
+                axis.text.x = element_blank(),
+                axis.ticks.x = element_blank()
+        )
+
+# plor for male
+
+menCat <- 
+        ggplot(data = maleDist,
+        aes(x = reorder(char, proximity), y = proximity)) + 
+        geom_col(fill = 'darkblue') +
+        geom_text(aes(label = round(proximity, digits = 3)),
+                  hjust = -0.2,
+                  color = 'dimgray') +
+        coord_flip() + 
+        ylim(0, 2) +
+        labs(
+                title = 'Men',
+                x = '',
+                y = ''
+        ) + 
+        theme_classic() + 
+             theme(
+                title = element_text(size = 12, 
+                                     colour = 'dimgray',
+                                     face = 'italic'),
+                plot.title.position = 'plot',
+                axis.line = element_blank(),
+                axis.ticks = element_blank(),
+                axis.text.x = element_blank(),
+                axis.ticks.x = element_blank(),
+                
+        )
+
+grid.arrange(
+        womenCat,
+        menCat,
+        nrow = 1
+)
+```
+
+## Cluster characteristics
+
+```{r CLUSTER, message=F, warning=F, echo=FALSE}
+
+# Determine best method for clustering
+
+method <- list("average", "single", "complete", "ward")
+
+# Aglomeration coefficient for all linls
+
+ac <- function(x){
+        
+        agnes(
+                demographics %>%
+                        filter(as.character(ethnicity) != 'Não informado') %>%
+                        select_if(is.factor) %>%
+                        select(-category, -Division, -disability, -Department) %>%
+                        as.data.frame(),
+                method = x,
+                diss = F
+        )$ac
+}
+
+aggCoef <- map_dbl(method, ac)
+
+aggCoef <- tibble(simplify(method), aggCoef)
+
+names(aggCoef) <- c("Method", "Agregation Coeficient")
+
+# Number of clusters
+
+nClus <- n_clusters(demoMca, force = T)
+
+# Dissimilarity matrix
+
+dissM <- daisy(demoMca, metric = c('gower'))
+
+# Jackard coefficient
+
+set.seed(123456)
+
+jccCoef <-
+  clusterboot(
+          data = dissM,
+          clustermethod = hclustCBI,
+          method = "ward.D",
+          count = F,
+          k = 4
+  )
+  
+# Cluster observations
+
+hClust <- 
+        hclust(
+                d = dissM,
+                method = 'ward.D2'
+        )
+
+# Cluster prediction
+
+demoMca$cluster <- cutree(hClust, 4)
+
+# Heatmap Preparation
+
+demoLong <- 
+        melt(data.frame(lapply(demoMca, as.character),
+                        stringsAsFactors = FALSE), 
+                  id = c("cluster"), factorsAsStrings = T)
+
+demoLongQ <- 
+        demoLong %>% 
+        group_by(cluster, variable, value) %>%
+        count() %>%
+        distinct(cluster, variable, value, n)
+
+# Percent of each characteristic for each cluster
+
+demoLongP <- 
+        demoLongQ %>%
+        group_by(cluster, variable) %>%
+        mutate(perc = n / sum(n)) %>%
+        arrange(cluster)
+
+# Heatmap
+
+levels <-
+        demoMca %>% 
+        select(-cluster) %>% 
+        map(levels) %>% 
+        unlist() %>% 
+        as.character()
+
+ggplot(
+        data = demoLongP,
+        mapping = aes(x = cluster, 
+                      y = factor(value, levels = levels),
+                      fill = perc)
+        ) +
+        geom_tile() +
+        labs(
+                title = '',
+                y = '',
+                x = 'Cluster'
+        ) +
+        
+        scale_fill_viridis(name = '') +
+        
+        theme_classic() + 
+        theme(
+                title = element_text(size = 18, 
+                                     colour = 'dimgray',
+                                     face = 'bold'),
+                plot.title.position = 'plot',
+                axis.line = element_blank(),
+                axis.ticks = element_blank()
+)
+        
+```

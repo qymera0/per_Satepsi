@@ -1,0 +1,775 @@
+---
+title: "Women´s Network Pesquisa de Retenção"
+author: "Samuel B Baco"
+subtitle: Relatório técnico de análise da pesquisa de retenção
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+<style>
+body {
+text-align: justify}
+</style>
+
+### 0 INTRODUÇÃO
+
+Este relatório se refere à análise das respostas da *pesquisa de retenção* realizada pelo Whirlpool Women´s Network, durante os meses de Agosto e Setembro de 2020. As informações aqui não necessariamente devem ser adicionadas à apresentações gerenciais. O foco é procurar relações entre as diversas variáveis para fazer submergir padrões que levem à ações posteriores. 
+
+A organização desse documento seguirá a seguinte forma:
+
+1. Carregamento dos dados
+2. “Data wrangling”
+3. Análise gráfica das perguntas individuais
+4. Determinação de **personas**
+5. Relação das personas com as variáveis descritivas
+6. Análise de texto
+7. Conclusão
+
+### 1 CARREGAMENTO DOS DADOS
+
+#### 1.1 Carregamento dos pacotes
+
+Essa é a lista de pacotes do R que foram usados na análise.
+
+```{r PACKAGE LOAD, message=F, warning=F}
+library(tidyverse)
+library(tidymodels)
+library(googledrive)
+library(googlesheets4)
+library(cluster)
+library(magrittr)
+library(factoextra)
+library(fpc)
+library(viridis)
+library(reshape)
+library(GGally)
+library(rpart)
+library(rpart.plot)
+library(survMisc)
+library(tidytext)
+library(textclean)
+```
+
+#### 1.2 Carregamento dos dados do Google Drive
+
+Para facilitar a renderização dos dados, eles foram lidos em separado (o código está no apêndice) e salvos em um arquivo Rdata.  
+
+```{r DATA RETRIEVE}
+load("~/R/womensSurvey/df.RData")
+```
+
+\newpage
+
+### 2 DATA WRANGLING
+
+```{r DATA WRANGLING}
+varNames <- as_tibble(names(df[-c(1, 32)]))
+dfClean <-
+        df %>% 
+        select(-c("Carimbo de data/hora"), -32) %>%
+        dplyr::rename("genero" = 1, "t.casa" = 2, "e.civ" = 3, "filhos" = 4, 
+                      "resp" = 5, "coment.resp" = 6, "apoio.dom" = 7, 
+                      "apoio.dep" = 8, "coment.apoio" = 9, "unid" = 10, 
+                      "dir" = 11, "cargo" = 12, "regime.p" = 13, "regime.h" = 14, 
+                      "ambiente" = 15, "outras.ativ" = 16, "commnt.ativ" = 17, 
+                      "coment.whp" = 18, "f.ho" = 19, "f.Vee" = 20, 
+                      "f.gestor" = 21, "f.dist.soc" = 22, "f.red.jor" = 23, 
+                      "f.red.sal" = 24, "f.susp" = 25, "f.com" = 26, 
+                      "f.engag" = 27, "f.clima" = 28, "f.social" = 29, 
+                      "coment.fin" = 30) %>%
+        mutate(genero = factor(genero)) %>% 
+  
+        # "Arrumar" a coluna "tempo de casa"
+  
+        mutate(t.casa = str_replace_all(t.casa, 
+                                        pattern = "ano.*|ANO.*|Ano.*", 
+                                        replacement = "")) %>% 
+        mutate(t.casa = replace(t.casa, 
+                                str_detect(t.casa, "mes|mês|semana|MES"),
+                                "1")) %>% 
+        mutate(t.casa = replace(t.casa,
+                                str_detect(t.casa, "Trabalhei 22"),
+                                "22")) %>%
+        mutate(t.casa = replace(t.casa,
+                                str_detect(t.casa, "um"),
+                                "1")) %>%
+        mutate(t.casa = replace(t.casa,
+                                str_detect(t.casa, "Outubro farei 3"),
+                                "3")) %>%
+        mutate(t.casa = replace(t.casa,
+                                str_detect(t.casa, "\\+ de 3"),
+                                "3")) %>%
+        mutate(t.casa = replace(t.casa,
+                                str_detect(t.casa, "20 dias"),
+                                "1"))%>%
+        mutate(t.casa = replace(t.casa,
+                                str_detect(t.casa, "\\+ de 1"),
+                                "2")) %>%
+        mutate(t.casa = replace(t.casa,
+                                str_detect(t.casa, "Quase 2"),
+                                "2")) %>%
+        mutate(t.casa = str_replace_all(t.casa, ",", "\\.")) %>% 
+        mutate(t.casa = as.numeric(t.casa)) %>% 
+  
+        # "Arrumar" a coluna "estado civil"
+  
+        mutate(e.civ = replace(e.civ,
+                               str_detect(e.civ, "vorci|eparad|rcio"),
+                               "Separado")) %>%
+        mutate(e.civ = replace(e.civ,
+                               str_detect(e.civ, 
+                                          "masi|onviv|junt|oiv|amo|comp|vel|VEL"),
+                               "UE")) %>% 
+        mutate(e.civ = factor(e.civ,
+                              levels = c("Solteiro", 
+                                         "UE", 
+                                         "Casado", 
+                                         "Separado"))) %>% 
+  
+        # "Arrumar" a coluna "filhos"
+  
+        mutate(filhos = str_replace_all(filhos, "\\s|fil.*", "")) %>% 
+        mutate(filhos = factor(filhos,
+                               levels = c("Não", "1", "2", "3"))) %>% 
+  
+        # "Arrumar" a coluna "Responsável"
+  
+        mutate(resp = replace(resp,
+                              str_detect(resp,
+                                         "1"),
+                              "1")) %>%
+        mutate(resp = replace(resp,
+                              str_detect(resp,
+                                         "2"),
+                              "2")) %>% 
+        mutate(resp = factor(resp,
+                             levels = c("Não", "1", "2"))) %>% 
+        mutate(apoio.dom = factor(apoio.dom)) %>% 
+  
+        # "Arrumar" a coluna "apoio dependentes"
+  
+        mutate(apoio.dep = replace(apoio.dep,
+                                   str_detect(apoio.dep,
+                                             "Não"),
+                                   "Não")) %>% 
+        mutate(apoio.dep = factor(apoio.dep)) %>%
+        mutate(unid = factor(unid)) %>% 
+  
+        # "Arrumar" a coluna "diretoria"
+  
+        mutate(dir = replace(dir,
+                             str_detect(dir,
+                                        "amb|Amb|AMB|EHS"),
+                             "EHSAmb")) %>%
+        mutate(dir = replace(dir,
+                             str_detect(dir,
+                                        "prod|GPO|Lab"),
+                             "GPO")) %>%
+        mutate(dir = replace(dir,
+                             str_detect(dir,
+                                        "Design|GCD"),
+                             "GCD")) %>% 
+        mutate(dir = replace(dir,
+                             str_detect(dir,
+                                        "P4G"),
+                             "P4G")) %>%
+        mutate(dir = replace(dir,
+                             str_detect(dir,
+                                        "Care"),
+                             "Serv")) %>% 
+        mutate(dir = replace(dir,
+                             str_detect(dir,
+                                        "Indus"),
+                             "Industrial")) %>%
+        mutate(dir = replace(dir,
+                              str_detect(dir,
+                                         "Log"),
+                              "Logistica")) %>%
+        mutate(dir = replace(dir,
+                              str_detect(dir,
+                                         "Prom"),
+                              "Vendas")) %>%
+        mutate(dir = replace(dir,
+                              str_detect(dir,
+                                         "Quali"),
+                              "Qualidade")) %>%
+        mutate(dir = replace(dir,
+                              str_detect(dir,
+                                         "Reg"),
+                              "Regulatorio")) %>%
+        mutate(dir = replace(dir,
+                              str_detect(dir,
+                                         "Rela"),
+                              "RI")) %>%
+        mutate(dir = replace(dir,
+                              str_detect(dir,
+                                         "Trade"),
+                              "Marketing")) %>%
+        mutate(dir = factor(dir)) %>% 
+        mutate(cargo = factor(cargo,
+                              levels = c("Estagiário", 
+                                         "Terceiro", 
+                                         "Técnico", 
+                                         "Assistente", 
+                                         "Supervisor", 
+                                         "Analista",
+                                         "Engenheiro",
+                                         "Trainee",
+                                         "Manager",
+                                         "Sr Manager",
+                                         "Director and above"
+        ))) %>% 
+        
+        # "Arrumar" coluna "regime de trabalho"
+  
+        mutate(regime.p = replace(regime.p,
+                                  str_detect(regime.p,
+                                             "Man"),
+                                  "JP")) %>%
+        mutate(regime.p = replace(regime.p,
+                                  str_detect(regime.p,
+                                             "Red"),
+                                  "RJ")) %>%
+        mutate(regime.p = replace(regime.p,
+                                  str_detect(regime.p,
+                                             "Sus"),
+                                  "ST")) %>%
+        mutate(regime.p = factor(regime.p)) %>% 
+  
+        # "Arrumar" coluna "local de trabalho"
+  
+        mutate(regime.h = replace(regime.h,
+                                  str_detect(regime.h,
+                                             "Híbr"),
+                                  "HB")) %>%
+    
+        mutate(regime.h = replace(regime.h,
+                                  str_detect(regime.h,
+                                             "Home"),
+                                  "HO")) %>% 
+        mutate(regime.h = factor(regime.h,
+                                 c("Presencial", "HB", "HO"))) %>% 
+  
+        # "Arrumar" a coluna "Ambiente de trabalho"
+  
+         mutate(ambiente = replace(ambiente,
+                                   str_detect(ambiente,
+                                              "trabalhando"),
+                                   "NA")) %>%
+         mutate(ambiente = replace(ambiente,
+                                   str_detect(ambiente,
+                                              "Não tenho ambiente exclusivo"),
+                                   "NaoExc")) %>%
+         mutate(ambiente = replace(ambiente,
+                                   str_detect(ambiente,
+                                              "trabalhar e divido com outra pessoa"),
+                                   "dividido")) %>% 
+         mutate(ambiente = replace(ambiente,
+                                   str_detect(ambiente,
+                                              "exclusivo"),
+                                   "exclusivo")) %>% 
+         mutate(ambiente = factor(ambiente,
+                                  levels = c("dividido", 
+                                             "NaoExc", 
+                                             "exclusivo", 
+                                             "NA"))) %>%    
+         mutate(outras.ativ = replace(outras.ativ,
+                                      str_detect(outras.ativ,
+                                                 "estou"),
+                                      "NA")) %>%
+         mutate(outras.ativ = factor(outras.ativ,
+                                     c("Não", "Sim", "NA")))
+```
+
+\newpage
+
+### 3 ANÁLISE GRÁFICA
+
+#### 3.1 Gráficos Individuais
+
+Nesta secção vamos analisar individualmente cada pergunta para avaliar como a amostra está formada. Com intuito evitar muitos blocos de código no relatório, uma função foi escrita para desenhar os gráficos de barra empilhada para variáveis independentes.
+
+```{r INDIVIDUAL PLOT FUNCTION}
+ind_plot_char <- function(df, y, title){
+        
+        df %>% 
+                arrange(.data[[y]]) %>% 
+                ggplot(aes_string(x = shQuote(''), fill = y)) +
+                geom_bar(position = position_fill(reverse = TRUE), 
+                         width = 0.6) +
+                scale_y_continuous(labels = scales::percent) +
+                coord_flip() +
+                scale_fill_viridis_d(name = "") + 
+                labs(X = "", y = "", title = paste(strwrap(title,
+                                                           width = 50),
+                                                   collapse = "\n")) + 
+                theme_minimal() + 
+                theme(legend.position = "bottom",
+                      legend.justification = "right",
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank(),
+                      axis.title = element_blank(),
+                      axis.text = element_text(colour = "azure4"),
+                      plot.title = element_text(size = 18,
+                                                colour = "azure4",
+                                                face = "bold"),
+                      plot.title.position = "plot",
+                      legend.text = element_text(colour = "azure4")
+                )
+}
+```
+
+Com essa função, é possível iterar ao longo de todas as variáveis categóricas da pesquisa.
+
+```{r INDIVIDUAL PLOTS, fig.show = "hold", out.width = "50%", out.height = "50%", results="hide", echo=F }
+# Quais colunas serão usadas para o plot
+indPlotColSel <- c(1, 3, 4, 5, 7, 8, 10, 11, 12, 13, 14, 15, 16)
+# Extrai os nomes das variáveis relacionadas às colunas selecionadas
+indPlotVarNa <-
+  dfClean %>% 
+  names()
+# Constrói a lista contendo o nome da variável e o texto da pergunta
+indPlotList <- list()
+for (i in indPlotColSel){
+  
+  indPlotList$y[[i]] <- indPlotVarNa[i]
+  indPlotList$title[[i]] <- as.character(varNames[i, ])
+  
+}
+  
+# Remove os valores "NULL"
+indPlotList$y <- compact(indPlotList$y)
+indPlotList$title <- compact(indPlotList$title)
+# Desenha os gráficos usando as variáveis selecionadas
+indPlotList %>% 
+  pmap(ind_plot_char, df = dfClean)
+```
+
+#### 3.2 Gráficos de mosaico para gênero
+
+Do mesmo modo que foi feito para os gráficos individuais, uma função será escrita para permitir gráficos do tipo mosaico.
+
+```{r MOSAIC PLOT FUNCTION}
+mos_plot_char <- function(df, y, title){
+        
+        df %>% 
+                filter(genero != "Outros") %>%
+                arrange(.data[[y]]) %>%
+                ggplot(aes_string(x = "genero", fill = y)) +
+                geom_bar(position = position_fill(reverse = TRUE), 
+                         width = 0.6) +
+                scale_y_continuous(labels = scales::percent) +
+                coord_flip() +
+                scale_fill_viridis_d(name = "") + 
+                labs(X = "Genero", y = "", title = paste(strwrap(title,
+                                                                 width = 50),
+                                                         collapse = "\n")) + 
+                theme_minimal() + 
+                theme(legend.position = "bottom",
+                      legend.justification = "right",
+                      panel.grid.major = element_blank(),
+                      panel.grid.minor = element_blank(),
+                      axis.title = element_blank(),
+                      axis.text = element_text(colour = "azure4"),
+                      plot.title = element_text(size = 18,
+                                                colour = "azure4",
+                                                face = "bold"),
+                      plot.title.position = "plot",
+                      legend.text = element_text(colour = "azure4")
+                )
+}
+```
+
+Com essa função é possível iterar ao longo de todas as variáveis e comparar as distribuições entre gêneros.
+
+```{r MOSAIC PLOTS, fig.show = "hold", out.width = "50%", out.height = "50%", results="hide", echo=F}
+# Quais colunas serão usadas para o plot
+mosPlotColSel <- c(3, 4, 5, 7, 8, 10, 11, 12, 13, 14, 15, 16)
+# Extrai os nomes das variáveis relacionadas às colunas selecionadas
+mosPlotVarNa <-
+  dfClean %>% 
+  names()
+# Constrói a lista contendo o nome da variável e o texto da pergunta
+mosPlotList <- list()
+for (i in mosPlotColSel){
+  
+  mosPlotList$y[[i]] <- mosPlotVarNa[i]
+  mosPlotList$title[[i]] <- as.character(varNames[i, ])
+  
+}
+  
+# Remove os valores "NULL"
+mosPlotList$y <- compact(mosPlotList$y)
+mosPlotList$title <- compact(mosPlotList$title)
+# Desenha os gráficos usando as variáveis selecionadas
+mosPlotList %>% 
+  pmap(mos_plot_char, df = dfClean)
+```
+
+Algumas conclusões interessantes:
+
+* No geral, a amostra está balanceada em relação a **solteiros** e **casados**. Porém, as mulheres têm um percentual de estado civil **solteiro** maior que dos homens. 
+* No geral, a grande maioria das pessoas na pesquisa não possui filhos, com um leve predominância nas mulheres para a porcentagem de “sem filhos”.
+* Em sua grande maioria, independente do gênero, as pessoas não tem outra pessoa sob sua direta responsabilidade.
+* No geral, as mulheres têm uma proporção maior para auxílio nas taregas domésticas.
+* No geral, há uma minoria que têm rede de apoio para auxílio com filhos e/ou outros dependentes, e a proporção é igual entre homens e mulheres.
+* Mulheres tiveram uma suspensão de trabalho levemente maior que os homens, mas no regime atual, estão fazendo muito mais “home-office” que os homens. Homens também estão fazendo muito mais trabalho presencial que as mulheres.
+* Ao trabalhar em casa, mulheres tem menos chance de trabalhar em um espaço exclusivo que os homens, e tendem a fazer muito mais outras atividades enquanto trabalha.
+
+### 4 CRIAÇÃO DAS PERSONAS
+
+A construção dos personas será feita agrupando pessoas que votaram nas perguntas sobre relevância de modo semelhante. Esse agrupamento será feito utilizando um algoritmo de cluster hierárquico. O processo do uso desse algoritmo consiste em (1) determinar o melhor método de calcular a distância entre pontos / cluster, (2) determinar o número de clusters a ser utilizado, (3) checar se o número de clusters está adequado e (4) classificar as pessoas nos grupos escolhidos.
+
+#### 4.1 Determinação do cálculo da distância
+
+```{r METODO PARA CALCULO DA DISTANCIA}
+# Possíveis métodos de cálculo de distancia
+method <- list("average", "single", "complete", "ward")
+# Cálculo do coeficiente de aglomeração para todos os métodos
+ac <- function(x) {agnes(dfClean %>% select(19:29) %>% as.data.frame(), 
+                         method = x,
+                         diss = F)$ac}
+      
+aggCoef <- map_dbl(method, ac)
+aggCoef <- tibble(simplify(method), aggCoef)
+names(aggCoef) <- c("Method", "Agregation Coeficient")
+aggCoef
+```
+
+O método de ward apresentou o melhor valor do coeficiente de agregação. Ele será utilizado para estudar quantos clusters serão mantidos.
+
+#### 4.2 Determinação da quantidade de clusters nos dados.
+
+```{r QUANTIDADE DE CLUSTERS, cache=T, fig.show = "hold", out.width = "33%"}
+fviz_nbclust(dfClean %>% 
+             select(19:29) %>% 
+             as.data.frame(), 
+             FUN = hcut, 
+             method = "wss")
+fviz_nbclust(dfClean %>% 
+             select(19:29) %>% 
+             as.data.frame(),
+             FUN = hcut, 
+             method = "silhouette")
+fviz_gap_stat(clusGap(dfClean %>% 
+                      select(19:29) %>% 
+                      as.data.frame(), 
+                      FUN = hcut, 
+                      nstart = 25, 
+                      K.max = 20, B = 50))
+```
+
+Os três métodos testados (“Within sum of squares”, Silhouete e “Gap Statistics) chegaram à conclusões diferentes. Se forem selecionados muitos grupos (criado muitas personas), a análise pode ficar complexa. Por isso, usando o método ”Seilhouete”, serão criados 05 clusters / personas. Para esse número de clusters, o coeficiente de Jaccard será calculado para avaliar se os grupos se mantêm para dados diferentes. 
+
+#### 4.3 Validação do número de clusters
+
+```{r COEFICIENTE DE JACCARD, message = F, warning = F, results="hide"}
+jccCoef <-
+  dfClean %>% 
+  select(19:29) %>% 
+  as.data.frame() %>% 
+  clusterboot(clustermethod = hclustCBI,
+              method = "ward.D",
+              k = 5)
+```
+```{r AVALIAÇÃO DE JACCARD}
+jccCoef$bootmean
+jccCoef$bootbrd
+```
+
+A avaliação do coeficiente de Jaccard mostra que, para 5 clusters, com exceção dos clusters 1 e 5, todos apresentaram um grande grau de dissolvimento. Isso indica que o uso dessa quantidade pode levar a overfitting. Por isso, será mantido o número de 4 clusters. ^[Esse resultado é endorsado pela análise gráfica da "Whithin Sum Squares"] 
+
+```{r COEFICIENTE DE JACCARD n3, message = F, warning = F, results="hide"}
+jccCoef <-
+  dfClean %>% 
+  select(19:29) %>% 
+  as.data.frame() %>% 
+  clusterboot(clustermethod = hclustCBI,
+              method = "ward.D",
+              k = 4)
+```
+```{r AVALIAÇÃO DE JACCARD n4}
+jccCoef$bootmean
+jccCoef$bootbrd
+```
+
+Com 4 clusters, o valor do coeficiente de Jaccar se manteve pelo menos 0.5, indicando que, mesmo que os dados tivessem alguma alteração, a classificação seria a mesma. Como 3 clusters, os coeficiente ficariam melhores, porém há sempre o cluster de pessoas que votam 5 em todas as perguntas.
+
+#### 4.4 Classificação dos respondentes nos grupos.
+
+Com a definição de 3 personas, pode-se plotar agora o dendograma. 
+
+```{r DENDOGRAMA}
+# Calcula os clusters
+personaHc <-
+  dfClean %>% 
+  select(19:29) %>% 
+  as.data.frame() %>%
+  dist(method = "euclidian") %>% 
+  hclust(method = "ward.D")
+# Plota o dendograma
+color <- viridis(4)
+fviz_dend(personaHc,
+          k = 4,
+          palette = color) +
+labs(X = "", 
+     y = "", 
+     title = "Dendograma das quatro personas") + 
+theme_minimal() + 
+theme(panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.title = element_blank(),
+      axis.text = element_blank(),
+      plot.title = element_text(size = 18,
+                                colour = "azure4",
+                                face = "bold"),
+      plot.title.position = "plot"
+      )
+```
+
+Com a definição é importante também tentar caracterizar as personas em relação às notas de importância que foram dadas às perguntas de sobre relevância das ações.
+
+```{r PPLOTS, fig.show="hold", out.width="50%", out.height="50%"}
+# Salvar o cluster de cada pessoa na tabela
+dfClean$cluster <- cutree(personaHc, k = 4)
+# Jitter notas para facilitar o plot
+dfMelted <-
+  dfClean %>% 
+  select(19:29,31) %>% 
+  mutate(f.ho = jitter(f.ho),
+         f.Vee = jitter(f.Vee),
+         f.gestor = jitter(f.gestor), 
+         f.dist.soc = jitter(f.dist.soc),
+         f.red.jor = jitter(f.red.jor),
+         f.red.sal = jitter(f.red.sal),
+         f.susp = jitter(f.susp),
+         f.com = jitter(f.com),
+         f.engag = jitter(f.engag),
+         f.clima = jitter(f.clima),
+         f.social = jitter(f.social),
+         cluster = as.factor(cluster))
+# Parallel plots - todos
+ggparcoord(dfMelted, 
+           columns = 1:11, 
+           alphaLines = 0.2, 
+           scale = "globalminmax",
+           title = "Distribuição geral das notas") + 
+    labs(y = "",
+         x = "")  +
+    theme_minimal() + 
+    theme(panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          axis.title = element_text(colour = "azure4"),
+          axis.text = element_text(colour = "azure4"),
+          plot.title = element_text(size = 18,
+                                    colour = "azure4",
+                                    face = "bold"),
+          plot.title.position = "plot",
+          plot.subtitle = element_text(size = 12,
+                                       colour = "azure4")
+        )
+# Parallel plot - cluster 01
+dfMelted %>% 
+  arrange(factor(cluster, levels = c(4,3,2,1))) %>% 
+  ggparcoord(columns = 1:11,
+             groupColumn = 12,
+             alphaLines = 0.8, 
+             scale = "globalminmax",
+             title = "Distribuição das notas - Cluster 1") +
+  scale_color_manual(values = c("#440154FF", "#E8E8E8", "#E8E8E8", "#E8E8E8")) +
+    labs(y = "",
+         x = "")  +
+    theme_minimal() + 
+    theme(legend.position = "none",
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          axis.title = element_text(colour = "azure4"),
+          axis.text = element_text(colour = "azure4"),
+          plot.title = element_text(size = 18,
+                                    colour = "azure4",
+                                    face = "bold"),
+          plot.title.position = "plot",
+          plot.subtitle = element_text(size = 12,
+                                       colour = "azure4")
+        )
+# Parallel plot - cluster 02
+dfMelted %>% 
+  arrange(factor(cluster, levels = c(4,3,1,2))) %>% 
+  ggparcoord(columns = 1:11,
+             groupColumn = 12,
+             alphaLines = 0.8, 
+             scale = "globalminmax",
+             title = "Distribuição das notas - Cluster 2") +
+  scale_color_manual(values = c("#E8E8E8", "#31688EFF", "#E8E8E8", "#E8E8E8")) +
+    labs(y = "",
+         x = "")  +
+    theme_minimal() + 
+    theme(legend.position = "none",
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          axis.title = element_text(colour = "azure4"),
+          axis.text = element_text(colour = "azure4"),
+          plot.title = element_text(size = 18,
+                                    colour = "azure4",
+                                    face = "bold"),
+          plot.title.position = "plot",
+          plot.subtitle = element_text(size = 12,
+                                       colour = "azure4")
+        )
+# Parallel plot - cluster 03
+dfMelted %>% 
+  arrange(factor(cluster, levels = c(4,1,2,3))) %>% 
+  ggparcoord(columns = 1:11,
+             groupColumn = 12,
+             alphaLines = 0.8, 
+             scale = "globalminmax",
+             title = "Distribuição das notas - Cluster 3") +
+  scale_color_manual(values = c("#E8E8E8", "#E8E8E8","#35B779FF", "#E8E8E8")) +
+    labs(y = "",
+         x = "")  +
+    theme_minimal() + 
+    theme(legend.position = "none",
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          axis.title = element_text(colour = "azure4"),
+          axis.text = element_text(colour = "azure4"),
+          plot.title = element_text(size = 18,
+                                    colour = "azure4",
+                                    face = "bold"),
+          plot.title.position = "plot",
+          plot.subtitle = element_text(size = 12,
+                                       colour = "azure4")
+        )
+# Parallel plot - cluster 04
+dfMelted %>% 
+  arrange(factor(cluster, levels = c(1,2,3,4))) %>% 
+  ggparcoord(columns = 1:11,
+             groupColumn = 12,
+             alphaLines = 0.8, 
+             scale = "globalminmax",
+             title = "Distribuição das notas - Cluster 4") +
+  scale_color_manual(values = c("#E8E8E8", "#E8E8E8","#E8E8E8", "#FDE725FF")) +
+    labs(y = "",
+         x = "")  +
+    theme_minimal() + 
+    theme(legend.position = "none",
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          axis.title = element_text(colour = "azure4"),
+          axis.text = element_text(colour = "azure4"),
+          plot.title = element_text(size = 18,
+                                    colour = "azure4",
+                                    face = "bold"),
+          plot.title.position = "plot",
+          plot.subtitle = element_text(size = 12,
+                                       colour = "azure4")
+        )
+```
+
+A análise dos gráficos de coordenadas paralelas mostra:
+
+* Os clusters 1 e 4 são formados por pessoas que julgaram todas as ações como relevantes. Percebe-se uma grande quantidade de notas 4 e 5 em todas as perguntas, com poucas pessoas dando notas abaixo de 3. Percebe-se, para o cluster 1, uma grande variação na classificação do relevância do chefe das ações do grupo de clima.
+
+* O cluster 2 é formado por pessoas que tenderam a dar notas baixas em relação á as ações de engajamento e grupo de clima. Esse grupo também tendeu a classificar como menor a relevância da redução de jornada.
+
+* O cluster 3 é formado por pessoas que classificaram como pouco relevante as ações relacionadas às medidas do governo federal (redução de jornada, salário e suspensão do contrato de trabalho).
+
+\newpage
+
+### 5 RELAÇÃO DAS PERSONAS COM AS VARIÁVEIS MEDIDAS
+
+Para estudar a relação das personas (clusters) com as variáveis medidas, será construída uma árvore de classificação que indicará quais são as variáveis medidas que se relacionam especificamente com cada cluster.
+
+```{r ARVORE DE CLASSIFICACAO}
+set.seed(100)
+dfTree<-
+  dfClean %>% 
+  select(-c(2, 6, 9, 11, 17:30)) %>% 
+  mutate(cluster = factor(cluster))
+# Parametros de controle do algoritmo
+ctrl <- rpart.control(minsplit = 5,
+                      maxdepth = 30,
+                      xval = 10,
+                      cp = -1)
+# Modelo
+classTree <- rpart(cluster ~.,
+                   data = dfTree,
+                   control = ctrl,
+                   method = "class") 
+# Mostra os números de error relativo para validação cruzada
+printcp(classTree)
+plotcp(classTree)
+```
+
+A profundidade da árvore que tem o menor error relativo está relacionado á complexidade de valor 0.00857633 (5 splits)
+
+```{r ARVORE FINAL}
+finalTree <- prune(classTree, cp = 0.00857633)
+rpart.plot(finalTree,
+           type = 3,
+           clip.right.labs = F,
+           branch = .3,
+           under = T,
+           tweak = 1,
+           branch.lty = 3,
+           under.cex = 1.5)
+finalTree$variable.importance
+```
+* Cluster 1 é formado três tipos de pessoas. O primeiro tipo são todas as pessoas que tiveram seus contratos suspensos e hoje trabalham presencialmente ou home office, com cargos à partir do nível técnico (excluindo assistentes) (24% das pessoas). O segundo tipo são pessoas que ficaram como jornada padrão ou redução de jornada e hoje também trabalham presencialmente ou home office, casados e que, durante a suspensão não possuíam um ambiente exclusivo para trabalhar. O terceiro tipo são pessoas que hoje trabalham em regime híbrido em São Paulo e possuem 1 responsável.
+
+* Cluster 2 é formado por um tipo exclusivo de pessoas. O segundo tipo são pessoas que ficaram como jornada padrão ou redução de jornada e hoje trabalham presencialmente ou home office, casados, com cargos de terceiro, técnico ou manager e possuem ambiente exclusivo de trabalho, dividindo-o ou não.
+
+* Cluster 3 é o mais diverso de todos. Ele é independente do regime de trabalho na época da suspensão e agora. Também independe do estado civil ou do cargo. A única característica prevalecente é que muitas pessoas desse grupo trabalham nas cidades que não São Paulo.
+
+* Cluster 4 são pessoas com cargos até assistente de São Paulo, com 2 responsáveis.
+
+Com as descrições advindas do modelo, é possível utilizar a previsão do mesmo para formar novos grupos e reavaliar as notas dada.
+
+\newpage
+
+## 6 ANÁLISE DE TEXTO
+
+### 6.1 Comentário relacionado ao apoio em relaçao aos dependentes
+
+Para iniciar a análise, será selecionado somente as linhas que possuem comentários.
+
+```{r TEXT WRANGLING 01}
+dfApoio <-
+  dfClean %>% 
+  select(coment.apoio, cluster) %>% 
+  filter(!is.na(coment.apoio))
+checkApoio <- check_text(dfApoio$coment.apoio)
+checkApoio$elemental_checks
+```
+Usando as sugestões do pacote "textclean", os textos serão editados antes da análise.
+
+```{r}
+dfApoioClean <-
+  dfApoio %>%
+  mutate(coment.apoio = replace_number(coment.apoio, remove = T)) %>% 
+  mutate(coment.apoio = replace_emoticon(coment.apoio)) %>%  
+  mutate(coment.apoio = replace_incomplete(coment.apoio, replacement = ".")) %>% 
+  mutate(coment.apoio = add_missing_endmark(coment.apoio)) %>% 
+  mutate(coment.apoio = add_comma_space(coment.apoio)) %>% 
+  mutate(coment.apoio = replace_non_ascii(coment.apoio)) %>%  
+  mutate(coment.apoio = replace_time(coment.apoio))
+  
+  
+  
+  
+```
+
+
+### APÊNDICE
+
+Para evitar que o texto do relatório fique com “chunks” de códigos muito extensos, alguns códigos serão colocados aqui no apêndice.
+
+```{r CARREGAMENTO DADOS GOOGLE SHEET, warning=F, message=F, eval=F}
+# Autenticação no google drive
+drive_auth(email = "samuel_b_baco@whirlpool.com")
+# Read google sheets file
+df <- read_sheet("1DzsrramQqcP7_CYp7zaST2lrIM1fI6fRLxdv3T4IsM4")
+save(df, file = "df.RData")
+```

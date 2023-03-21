@@ -1,0 +1,120 @@
+---
+title: "SATEPSI - TESTES FAVORÁVEIS"
+subtitle: "Análise de cluster"
+author: ""
+format: 
+    pdf: 
+      include-in-header: latex/headFooter.tex
+      include-before-body: latex/before_body.tex
+execute: 
+  echo: false
+bibliography: references.bib
+---
+```{=html}
+<style>
+body {text-align: justify}
+</style>
+```
+\newpage
+
+\thispagestyle{plain}
+
+\tableofcontents
+
+\newpage
+
+\thispagestyle{plain}
+
+# 0 INTRODUÇÃO
+
+## Pacotes
+
+```{r}
+#| label: PACOTES
+#| message: false
+#| warning: false
+
+library(tidyverse)
+
+```
+
+# 1 WEB SCRAPING
+
+```{r}
+#| label: READTEXT
+#| message: false
+#| warning: false
+
+df <- 
+        read_delim(
+                "dataSets/satepsi20230302.txt", 
+                delim = "+", 
+                escape_double = FALSE, 
+                col_names = FALSE, 
+                trim_ws = TRUE) %>% 
+        select(X2) %>% 
+        rename('text' = 'X2')
+
+```
+
+```{r}
+#| label: CREATECOLUMS
+#| message: false
+#| warning: false
+
+dfSplit <-
+        df %>%
+        rowwise() %>% 
+        mutate(
+                nome = str_split(text, pattern = 'Autores')[[1]][[1]],
+                autor = str_split(text, pattern = 'Editora')[[1]][[1]],
+                autor = str_split(autor, pattern = 'Autores')[[1]][2],
+                editora = str_split(text, pattern = 'Construto')[[1]][[1]],
+                editora = str_split(editora, pattern = 'Editora')[[1]][2],
+                construto = str_split(text, pattern = 'Público Alvo')[[1]][[1]],
+                construto = str_split(construto, pattern = 'Construto')[[1]][2],
+                pub.alvo = str_split(text, pattern = 'Idade da amostra de normatização')[[1]][[1]],
+                pub.alvo = str_split(pub.alvo, pattern = 'Público Alvo')[[1]][2],
+                idade.amostra = str_split(text, pattern = 'Aplicação')[[1]][[1]],
+                idade.amostra = str_split(idade.amostra, pattern = 'Idade da amostra de normatização')[[1]][2],
+                aplicacao = str_split(text, pattern = 'Correção')[[1]][[1]],
+                aplicacao = str_split(aplicacao, pattern = 'Aplicação')[[1]][2],
+                correcao = str_split(text, pattern = 'Data aprovação')[[1]][[1]],
+                correcao = str_split(correcao, pattern = 'Correção')[[1]][2],
+                data.aprovacao = str_split(text, pattern = 'Prazo dos estudos de normatização')[[1]][[1]],
+                data.aprovacao = str_split(data.aprovacao, pattern = 'Data aprovação')[[1]][2],
+                prazo.norm = str_split(text, pattern = 'Prazo dos estudos de validade')[[1]][[1]],
+                prazo.norm = str_split(prazo.norm, pattern = 'Prazo dos estudos de normatização')[[1]][2],
+                prazo.val = str_split(text, pattern = 'Prazo dos estudos de validade')[[1]][2]
+        ) %>% 
+        select(-text) %>% 
+        filter(
+                str_detect(nome, 'Favorável')
+        )
+```
+
+```{r}
+#| label: CLEANCONSTRUCT
+#| message: false
+#| warning: false
+
+constClean <- 
+        read_csv("dataSets/constructos_clean.csv")
+```
+
+
+\newpage
+
+\thispagestyle{plain}
+
+# SESSION INFO
+
+```{r}
+sessionInfo()
+```
+
+\newpage
+
+\thispagestyle{plain}
+
+# REFERENCES
