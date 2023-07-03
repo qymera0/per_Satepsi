@@ -6,7 +6,7 @@ library(tidyverse)
 
 df <- 
         read_delim(
-                "satepsi20230302.txt", 
+                "dataSets/satepsifav202307031424.txt", 
                 delim = "+", 
                 escape_double = FALSE, 
                 col_names = FALSE, 
